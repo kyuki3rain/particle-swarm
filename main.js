@@ -27,6 +27,41 @@ document.getElementById('panel-header').addEventListener('click', () => {
   toggleBtn.textContent = open ? '▼' : '▲';
 });
 
+// ---- Presets ----
+const PRESETS = {
+  'small-animal': { local: 0.8, individ: 0.8, sync: 0.1, global: 0.0 },
+  'swarm':        { local: 0.3, individ: 0.2, sync: 0.9, global: 0.1 },
+  'grand':        { local: 0.1, individ: 0.1, sync: 0.9, global: 0.9 },
+  'curious':      { local: 0.7, individ: 0.5, sync: 0.2, global: 0.1 },
+  'default':      { local: 0.5, individ: 0.5, sync: 0.5, global: 0.5 },
+};
+const KEY_MAP = { local: 'local', individ: 'individ', sync: 'sync', global: 'global' };
+let lerpFrom = null, lerpTo = null, lerpT = 1.0;
+const LERP_SEC = 0.55;
+
+function smoothstep(t) { return t * t * (3 - 2 * t); }
+
+let activePresetBtn = null;
+document.querySelectorAll('.preset-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const preset = PRESETS[btn.dataset.preset];
+    lerpFrom = { local: sliders.local.v, individ: sliders.individ.v, sync: sliders.sync.v, global: sliders.global.v };
+    lerpTo = { ...preset };
+    lerpT = 0.0;
+    if (activePresetBtn) activePresetBtn.classList.remove('active');
+    activePresetBtn = btn;
+    btn.classList.add('active');
+  });
+});
+
+// Deactivate preset highlight when user manually moves a slider
+for (const s of Object.values(sliders)) {
+  s.el.addEventListener('input', () => {
+    if (activePresetBtn) { activePresetBtn.classList.remove('active'); activePresetBtn = null; }
+    lerpT = 1.0;
+  });
+}
+
 // Mouse / touch tracking
 let mouseX = 0.5, mouseY = 0.5, mouseDown = false;
 const canvas = document.getElementById('canvas');
@@ -170,11 +205,20 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let toCenter = center - p.pos;
   let pulseForce = toCenter * pulse * 0.0002;
 
+  // --- soft wall repulsion ---
+  // Linear ramp from 0 at margin boundary to max at the edge (pos=0 or pos=1).
+  // Prevents particles piling up at screen edges; wrap acts as safety net only.
+  let margin = 0.07;
+  let invM = 1.0 / margin;
+  let wx = max(0.0, margin - p.pos.x) - max(0.0, p.pos.x - (1.0 - margin));
+  let wy = max(0.0, margin - p.pos.y) - max(0.0, p.pos.y - (1.0 - margin));
+  let wallForce = vec2<f32>(wx, wy) * invM * 0.0004;
+
   // --- phase advance ---
   p.phase += dt * (1.0 + u.sync * 2.0 + hash(p.seed + t) * u.individ * 0.5);
 
   // --- integrate ---
-  let accel = cursorForce + jitter + syncForce + pulseForce;
+  let accel = cursorForce + jitter + syncForce + pulseForce + wallForce;
   p.vel = p.vel * (1.0 - 0.015) + accel;
 
   // speed clamp
@@ -333,6 +377,18 @@ fn fs_main(@location(0) color : vec4<f32>) -> @location(0) vec4<f32> {
     if (fpsTimer >= 0.5) {
       fpsEl.textContent = `FPS: ${Math.round(frameCount / fpsTimer)}`;
       frameCount = 0; fpsTimer = 0;
+    }
+
+    // lerp preset animation
+    if (lerpT < 1.0) {
+      lerpT = Math.min(1.0, lerpT + dt / LERP_SEC);
+      const ease = smoothstep(lerpT);
+      for (const key of ['local', 'individ', 'sync', 'global']) {
+        const v = lerpFrom[key] + (lerpTo[key] - lerpFrom[key]) * ease;
+        sliders[key].v = v;
+        sliders[key].el.value = v.toFixed(2);
+        sliders[key].val.textContent = v.toFixed(2);
+      }
     }
 
     // update uniforms
