@@ -28,6 +28,7 @@ document.getElementById('panel-header').addEventListener('click', () => {
 });
 
 // ---- Presets ----
+// Lerp runs in its own rAF loop, fully independent of WebGPU init timing.
 const PRESETS = {
   'small-animal': { local: 0.8, individ: 0.8, sync: 0.1, global: 0.0 },
   'swarm':        { local: 0.3, individ: 0.2, sync: 0.9, global: 0.1 },
@@ -35,30 +36,47 @@ const PRESETS = {
   'curious':      { local: 0.7, individ: 0.5, sync: 0.2, global: 0.1 },
   'default':      { local: 0.5, individ: 0.5, sync: 0.5, global: 0.5 },
 };
-const KEY_MAP = { local: 'local', individ: 'individ', sync: 'sync', global: 'global' };
-let lerpFrom = null, lerpTo = null, lerpT = 1.0;
-const LERP_SEC = 0.55;
+const PRESET_KEYS = ['local', 'individ', 'sync', 'global'];
+const LERP_MS = 550;
 
-function smoothstep(t) { return t * t * (3 - 2 * t); }
-
+let lerpHandle = null;
 let activePresetBtn = null;
+
+function applyPreset(preset) {
+  if (lerpHandle !== null) cancelAnimationFrame(lerpHandle);
+  const from = {};
+  for (const k of PRESET_KEYS) from[k] = sliders[k].v;
+  const startMs = performance.now();
+
+  (function step() {
+    const t = Math.min(1.0, (performance.now() - startMs) / LERP_MS);
+    const ease = t * t * (3 - 2 * t); // smoothstep
+    for (const k of PRESET_KEYS) {
+      const v = from[k] + (preset[k] - from[k]) * ease;
+      sliders[k].v = v;
+      sliders[k].el.value = v.toFixed(2);
+      sliders[k].val.textContent = v.toFixed(2);
+    }
+    lerpHandle = t < 1.0 ? requestAnimationFrame(step) : null;
+  })();
+}
+
 document.querySelectorAll('.preset-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const preset = PRESETS[btn.dataset.preset];
-    lerpFrom = { local: sliders.local.v, individ: sliders.individ.v, sync: sliders.sync.v, global: sliders.global.v };
-    lerpTo = { ...preset };
-    lerpT = 0.0;
+    if (!preset) return;
+    applyPreset(preset);
     if (activePresetBtn) activePresetBtn.classList.remove('active');
     activePresetBtn = btn;
     btn.classList.add('active');
   });
 });
 
-// Deactivate preset highlight when user manually moves a slider
+// Deactivate preset when user manually moves a slider
 for (const s of Object.values(sliders)) {
   s.el.addEventListener('input', () => {
+    if (lerpHandle !== null) { cancelAnimationFrame(lerpHandle); lerpHandle = null; }
     if (activePresetBtn) { activePresetBtn.classList.remove('active'); activePresetBtn = null; }
-    lerpT = 1.0;
   });
 }
 
@@ -279,16 +297,16 @@ struct VSOut {
   @location(0) color     : vec4<f32>,
 }
 
-// Quad corners: 2 triangles, CCW
-const QUAD = array<vec2<f32>, 6>(
-  vec2(-1.0, -1.0), vec2( 1.0, -1.0), vec2(-1.0,  1.0),
-  vec2( 1.0, -1.0), vec2( 1.0,  1.0), vec2(-1.0,  1.0)
-);
-
 @vertex
 fn vs_main(@builtin(vertex_index) vi : u32) -> VSOut {
-  let pidx   = vi / 6u;
-  let corner = QUAD[vi % 6u];
+  let pidx = vi / 6u;
+  let ci   = vi % 6u;
+  // Inline quad corners (triangle-list, 2 triangles CCW):
+  // tri0: (0,0)(-1,-1) (1,0)(1,-1) (2,0)(-1,1)
+  // tri1: (3,0)(1,-1)  (4,0)(1,1)  (5,0)(-1,1)
+  var qx = -1.0; if (ci == 1u || ci == 3u || ci == 4u) { qx = 1.0; }
+  var qy = -1.0; if (ci == 2u || ci == 4u || ci == 5u) { qy = 1.0; }
+  let corner = vec2<f32>(qx, qy);
   let p = particles[pidx];
 
   // center in NDC (Y flipped: screen Y=0 is top)
@@ -377,18 +395,6 @@ fn fs_main(@location(0) color : vec4<f32>) -> @location(0) vec4<f32> {
     if (fpsTimer >= 0.5) {
       fpsEl.textContent = `FPS: ${Math.round(frameCount / fpsTimer)}`;
       frameCount = 0; fpsTimer = 0;
-    }
-
-    // lerp preset animation
-    if (lerpT < 1.0) {
-      lerpT = Math.min(1.0, lerpT + dt / LERP_SEC);
-      const ease = smoothstep(lerpT);
-      for (const key of ['local', 'individ', 'sync', 'global']) {
-        const v = lerpFrom[key] + (lerpTo[key] - lerpFrom[key]) * ease;
-        sliders[key].v = v;
-        sliders[key].el.value = v.toFixed(2);
-        sliders[key].val.textContent = v.toFixed(2);
-      }
     }
 
     // update uniforms
