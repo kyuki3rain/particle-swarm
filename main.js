@@ -37,6 +37,7 @@ const PRESETS = {
 };
 const KEY_MAP = { local: 'local', individ: 'individ', sync: 'sync', global: 'global' };
 let lerpFrom = null, lerpTo = null, lerpT = 1.0;
+let isLerpUpdating = false;
 const LERP_SEC = 0.55;
 
 function smoothstep(t) { return t * t * (3 - 2 * t); }
@@ -57,6 +58,7 @@ document.querySelectorAll('.preset-btn').forEach(btn => {
 // Deactivate preset highlight when user manually moves a slider
 for (const s of Object.values(sliders)) {
   s.el.addEventListener('input', () => {
+    if (isLerpUpdating) return; // ignore programmatic changes during lerp
     if (activePresetBtn) { activePresetBtn.classList.remove('active'); activePresetBtn = null; }
     lerpT = 1.0;
   });
@@ -383,12 +385,14 @@ fn fs_main(@location(0) color : vec4<f32>) -> @location(0) vec4<f32> {
     if (lerpT < 1.0) {
       lerpT = Math.min(1.0, lerpT + dt / LERP_SEC);
       const ease = smoothstep(lerpT);
+      isLerpUpdating = true;
       for (const key of ['local', 'individ', 'sync', 'global']) {
         const v = lerpFrom[key] + (lerpTo[key] - lerpFrom[key]) * ease;
         sliders[key].v = v;
         sliders[key].el.value = v.toFixed(2);
         sliders[key].val.textContent = v.toFixed(2);
       }
+      isLerpUpdating = false;
     }
 
     // update uniforms
