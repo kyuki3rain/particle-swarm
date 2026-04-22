@@ -113,6 +113,9 @@ struct Uniforms {
   individ    : f32,
   sync       : f32,
   globalScale: f32,
+  screenSize : vec2<f32>,
+  mouseDown  : f32,
+  _pad       : f32,
 }
 
 @group(0) @binding(0) var<storage, read_write> particles : array<Particle>;
@@ -141,11 +144,17 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let t  = u.time;
 
   // --- cursor force ---
+  // No hard cutoff: pure inverse-square decay (gravity style).
+  // Near particles feel it strongly; far ones barely.
+  // Per-particle sensitivity modulated by individ:
+  //   individ=0 → all react equally (sensitivity=1)
+  //   individ=1 → uniform [0, 2] spread (some ignore, some react double)
   let toMouse = u.mouse - p.pos;
-  let dist = length(toMouse) + 0.001;
-  // repel within 0.04 (≈4% of screen), attract beyond
-  let attract = step(0.04, dist) * 2.0 - 1.0;
-  let cursorForce = (toMouse / dist) * attract * u.localReact * 0.00015 / (dist * dist + 0.02);
+  let dist = length(toMouse) + 0.0001;
+  let dir = toMouse / dist;
+  let sensitivity = mix(1.0, hash(p.seed * 7.3) * 2.0, u.individ);
+  let forceSign = select(-1.0, 1.0, u.mouseDown > 0.5); // repel default, attract on hold
+  let cursorForce = dir * forceSign * sensitivity * u.localReact * 0.000018 / (dist * dist + 0.002);
 
   // --- trajectory jitter (個体差) ---
   let jitter = noise2(p.pos * 10.0 + p.seed * 100.0) * u.individ * 0.0004;
@@ -214,7 +223,8 @@ struct Uniforms {
   sync       : f32,
   globalScale: f32,
   screenSize : vec2<f32>,  // CSS pixels (innerWidth, innerHeight)
-  _pad       : vec2<f32>,
+  mouseDown  : f32,
+  _pad       : f32,
 }
 
 @group(0) @binding(0) var<storage, read> particles : array<Particle>;
@@ -337,7 +347,8 @@ fn fs_main(@location(0) color : vec4<f32>) -> @location(0) vec4<f32> {
     uni[7] = sliders.global.v;
     uni[8] = window.innerWidth;
     uni[9] = window.innerHeight;
-    uni[10] = 0; uni[11] = 0; // pad
+    uni[10] = mouseDown ? 1.0 : 0.0;
+    uni[11] = 0;
     device.queue.writeBuffer(uniformBuf, 0, uni);
 
     const cmd = device.createCommandEncoder();
