@@ -215,7 +215,9 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   // --- sync vector field (same-direction pull) ---
   let fieldAngle = sin(p.pos.x * 4.0 + t * 0.3) * cos(p.pos.y * 4.0 - t * 0.2) * 3.14159;
   let fieldVec = vec2<f32>(cos(fieldAngle), sin(fieldAngle));
-  let syncForce = (fieldVec - normalize(p.vel + vec2<f32>(0.0001))) * u.sync * 0.0003;
+  let velLen = length(p.vel);
+  let velNorm = select(vec2<f32>(0.0), p.vel / velLen, velLen > 0.0001);
+  let syncForce = (fieldVec - velNorm) * u.sync * 0.0003;
 
   // --- global pulsation (大域脈動) ---
   let pulse = sin(t * 1.5 + p.phase) * u.globalScale;
@@ -223,20 +225,11 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let toCenter = center - p.pos;
   let pulseForce = toCenter * pulse * 0.0002;
 
-  // --- soft wall repulsion ---
-  // Linear ramp from 0 at margin boundary to max at the edge (pos=0 or pos=1).
-  // Prevents particles piling up at screen edges; wrap acts as safety net only.
-  let margin = 0.07;
-  let invM = 1.0 / margin;
-  let wx = max(0.0, margin - p.pos.x) - max(0.0, p.pos.x - (1.0 - margin));
-  let wy = max(0.0, margin - p.pos.y) - max(0.0, p.pos.y - (1.0 - margin));
-  let wallForce = vec2<f32>(wx, wy) * invM * 0.0004;
-
   // --- phase advance ---
   p.phase += dt * (1.0 + u.sync * 2.0 + hash(p.seed + t) * u.individ * 0.5);
 
   // --- integrate ---
-  let accel = cursorForce + jitter + syncForce + pulseForce + wallForce;
+  let accel = cursorForce + jitter + syncForce + pulseForce;
   p.vel = p.vel * (1.0 - 0.015) + accel;
 
   // speed clamp
