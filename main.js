@@ -87,10 +87,10 @@ async function init() {
   });
   device.queue.writeBuffer(particleBuf, 0, particleData);
 
-  // ---- Uniform buffer (32 bytes) ----
-  // mouse.xy, time, deltaTime, localReact, individ, sync, globalScale
+  // ---- Uniform buffer (48 bytes) ----
+  // mouse.xy, time, dt, localReact, individ, sync, globalScale, screenSize.xy, _pad.xy
   const uniformBuf = device.createBuffer({
-    size: 32,
+    size: 48,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
@@ -143,8 +143,9 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   // --- cursor force ---
   let toMouse = u.mouse - p.pos;
   let dist = length(toMouse) + 0.001;
-  let attract = step(0.15, dist) * 2.0 - 1.0; // attract beyond 0.15, repel inside
-  let cursorForce = (toMouse / dist) * attract * u.localReact * 0.0006 / (dist * dist + 0.01);
+  // repel within 0.04 (≈4% of screen), attract beyond
+  let attract = step(0.04, dist) * 2.0 - 1.0;
+  let cursorForce = (toMouse / dist) * attract * u.localReact * 0.00015 / (dist * dist + 0.02);
 
   // --- trajectory jitter (個体差) ---
   let jitter = noise2(p.pos * 10.0 + p.seed * 100.0) * u.individ * 0.0004;
@@ -193,6 +194,8 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   });
 
   // ---- Render shader (WGSL) ----
+  // Each particle rendered as a 2-triangle quad (6 vertices).
+  // vi / 6 = particle index, vi % 6 = corner index within quad.
   const renderShaderCode = /* wgsl */`
 struct Particle {
   pos   : vec2<f32>,
@@ -210,6 +213,8 @@ struct Uniforms {
   individ    : f32,
   sync       : f32,
   globalScale: f32,
+  screenSize : vec2<f32>,  // CSS pixels (innerWidth, innerHeight)
+  _pad       : vec2<f32>,
 }
 
 @group(0) @binding(0) var<storage, read> particles : array<Particle>;
@@ -220,13 +225,29 @@ struct VSOut {
   @location(0) color     : vec4<f32>,
 }
 
+// Quad corners: 2 triangles, CCW
+const QUAD = array<vec2<f32>, 6>(
+  vec2(-1.0, -1.0), vec2( 1.0, -1.0), vec2(-1.0,  1.0),
+  vec2( 1.0, -1.0), vec2( 1.0,  1.0), vec2(-1.0,  1.0)
+);
+
 @vertex
 fn vs_main(@builtin(vertex_index) vi : u32) -> VSOut {
-  let p = particles[vi];
-  // NDC: pos is [0,1], map to [-1,1]
-  let ndc = p.pos * 2.0 - 1.0;
+  let pidx   = vi / 6u;
+  let corner = QUAD[vi % 6u];
+  let p = particles[pidx];
+
+  // center in NDC (Y flipped: screen Y=0 is top)
+  let cx = p.pos.x * 2.0 - 1.0;
+  let cy = -(p.pos.y * 2.0 - 1.0);
+
+  // 3 CSS-pixel radius quad
+  let r = 3.0;
+  let sx = r * 2.0 / u.screenSize.x;
+  let sy = r * 2.0 / u.screenSize.y;
+
   var out : VSOut;
-  out.pos = vec4<f32>(ndc.x, -ndc.y, 0.0, 1.0);
+  out.pos = vec4<f32>(cx + corner.x * sx, cy + corner.y * sy, 0.0, 1.0);
 
   // color: hue from phase + speed tint
   let spd = length(p.vel) * 300.0;
@@ -234,7 +255,6 @@ fn vs_main(@builtin(vertex_index) vi : u32) -> VSOut {
   let sat = 0.6 + u.sync * 0.4;
   let val = 0.6 + spd * 0.4;
 
-  // HSV -> RGB (inline)
   let h6 = hue * 6.0;
   let i  = floor(h6);
   let f  = h6 - i;
@@ -271,7 +291,7 @@ fn fs_main(@location(0) color : vec4<f32>) -> @location(0) vec4<f32> {
         alpha: { srcFactor: 'one',       dstFactor: 'one', operation: 'add' },
       }
     }]},
-    primitive: { topology: 'point-list' },
+    primitive: { topology: 'triangle-list' },
   });
 
   // ---- Bind groups ----
@@ -306,7 +326,7 @@ fn fs_main(@location(0) color : vec4<f32>) -> @location(0) vec4<f32> {
     }
 
     // update uniforms
-    const uni = new Float32Array(8);
+    const uni = new Float32Array(12);
     uni[0] = mouseX;
     uni[1] = mouseY;
     uni[2] = now / 1000;
@@ -315,6 +335,9 @@ fn fs_main(@location(0) color : vec4<f32>) -> @location(0) vec4<f32> {
     uni[5] = sliders.individ.v;
     uni[6] = sliders.sync.v;
     uni[7] = sliders.global.v;
+    uni[8] = window.innerWidth;
+    uni[9] = window.innerHeight;
+    uni[10] = 0; uni[11] = 0; // pad
     device.queue.writeBuffer(uniformBuf, 0, uni);
 
     const cmd = device.createCommandEncoder();
@@ -338,7 +361,7 @@ fn fs_main(@location(0) color : vec4<f32>) -> @location(0) vec4<f32> {
     });
     rp.setPipeline(renderPipeline);
     rp.setBindGroup(0, renderBindGroup);
-    rp.draw(NUM_PARTICLES);
+    rp.draw(NUM_PARTICLES * 6);
     rp.end();
 
     device.queue.submit([cmd.finish()]);
