@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>粒子群シミュレーション</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+
+  #panel {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    background: rgba(10, 10, 20, 0.85);
+    border: 1px solid rgba(120, 180, 255, 0.25);
+    border-radius: 10px;
+    color: #c8d8ff;
+    font-size: 12px;
+    z-index: 10;
+    min-width: 220px;
+    backdrop-filter: blur(6px);
+  }
+  #panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid rgba(120, 180, 255, 0.15);
+  }
+  #panel-header span { font-size: 13px; font-weight: bold; letter-spacing: 0.05em; }
+  #toggle-btn {
+    background: none; border: none; color: #7ab4ff; font-size: 14px; cursor: pointer; line-height: 1;
+  }
+  #panel-body { padding: 10px 12px 12px; }
+  .slider-row { margin-bottom: 10px; }
+  .slider-row:last-child { margin-bottom: 0; }
+  .slider-label {
+    display: flex; justify-content: space-between; margin-bottom: 4px;
+  }
+  .slider-name { color: #90b8ff; }
+  .slider-val { color: #ffe080; font-size: 11px; }
+  input[type=range] {
+    width: 100%; height: 4px; appearance: none;
+    background: linear-gradient(to right, #3a6fff, #80c0ff);
+    border-radius: 2px; outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    appearance: none; width: 12px; height: 12px;
+    background: #fff; border-radius: 50%; box-shadow: 0 0 4px #6af;
+  }
+  #fps {
+    position: fixed; bottom: 10px; right: 12px;
+    color: rgba(150, 200, 255, 0.5); font-size: 11px; font-family: monospace;
+  }
+  #webgpu-warn {
+    display: none; position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(40,0,0,0.9); color: #ff8080; padding: 24px 32px;
+    border-radius: 10px; font-size: 14px; text-align: center; z-index: 100;
+    border: 1px solid #ff4444;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="panel">
+  <div id="panel-header">
+    <span>粒子群 パラメータ</span>
+    <button id="toggle-btn">▲</button>
+  </div>
+  <div id="panel-body">
+    <div class="slider-row">
+      <div class="slider-label">
+        <span class="slider-name">局所反応性</span>
+        <span class="slider-val" id="val-local">0.50</span>
+      </div>
+      <input type="range" id="sl-local" min="0" max="1" step="0.01" value="0.50">
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">
+        <span class="slider-name">個体差</span>
+        <span class="slider-val" id="val-individ">0.50</span>
+      </div>
+      <input type="range" id="sl-individ" min="0" max="1" step="0.01" value="0.50">
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">
+        <span class="slider-name">同期性</span>
+        <span class="slider-val" id="val-sync">0.50</span>
+      </div>
+      <input type="range" id="sl-sync" min="0" max="1" step="0.01" value="0.50">
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">
+        <span class="slider-name">大域スケール</span>
+        <span class="slider-val" id="val-global">0.50</span>
+      </div>
+      <input type="range" id="sl-global" min="0" max="1" step="0.01" value="0.50">
+    </div>
+  </div>
+</div>
+
+<div id="fps">FPS: --</div>
+<div id="webgpu-warn">
+  <strong>WebGPU 非対応</strong><br>
+  Chrome 113+ または Edge 113+ が必要です。
+</div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>
